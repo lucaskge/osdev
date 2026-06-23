@@ -1,87 +1,151 @@
 #include "fs.h"
 #include "vga.h"
-#include "ata.h"
 
-#define MAX_FILES 16
+// Importamos as funções físicas de leitura e escrita do driver ATA (ata.c)
+extern void ata_read_sector(unsigned int sector, unsigned char* buffer);
+extern void ata_write_sector(unsigned int sector, unsigned char* buffer);
 
-// Nossa tabela de arquivos em RAM que espelha o diretório raiz do disco
-struct file_entry root_dir[MAX_FILES];
-int file_count = 0;
-
-// Buffer para ler os dados do setor do HD
-unsigned char file_buffer[512];
-
-// Função auxiliar Bare Metal para comparar nomes de arquivos
-static int name_compare(const char* s1, const char* s2) {
-    for (int i = 0; i < 11; i++) {
-        if (s1[i] != s2[i]) return 0;
-    }
-    return 1;
-}
+// Buffer temporário de 512 bytes para manipulação de setores na RAM
+static unsigned char fs_buffer[512];
 
 void fs_init(void) {
-    // Vamos criar dois arquivos "fakes" apontando para setores do HD para testar o sistema
-    
-    // 1. Arquivo de texto simples
-    for(int i=0; i<11; i++) root_dir[0].name[i] = "README  TXT"[i];
-    root_dir[0].attr = 0x00;    // Arquivo normal
-    root_dir[0].size = 30;      // 30 bytes
-    root_dir[0].cluster = 10;   // Seus dados estarão no Setor 10 do HD
-
-    // 2. Uma pasta/diretório
-    for(int i=0; i<11; i++) root_dir[1].name[i] = "DOCUMENTOS "[i];
-    root_dir[1].attr = 0x10;    // Subdiretório/Pasta
-    root_dir[1].size = 0;
-    root_dir[1].cluster = 20;   // Começa no Setor 20
-
-    file_count = 2;
+    terminal_print("Sistema de Arquivos FAT inicializado no Kernel.\n");
 }
 
 void fs_list_directory(void) {
-    terminal_print("Nome         Tipo          Tamanho (Bytes)\n");
-    terminal_print("------------------------------------------\n");
-    
-    for (int i = 0; i < file_count; i++) {
-        // Printa o nome
-        char name_buf[12];
-        for(int j=0; j<11; j++) name_buf[j] = root_dir[i].name[j];
-        name_buf[11] = '\0';
-        terminal_print(name_buf);
-        terminal_print("  ");
+    ata_read_sector(10, fs_buffer);
 
-        // Printa se é arquivo ou pasta
-        if (root_dir[i].attr & 0x10) {
-            terminal_print("<DIR>         -----\n");
-        } else {
-            terminal_print("<ARQ>         ");
-            // Conversor rudimentar de número para string para mostrar o tamanho
-            char size_str[5];
-            size_str[0] = '0' + (root_dir[i].size / 10) % 10;
-            size_str[1] = '0' + (root_dir[i].size % 10);
-            size_str[2] = '\n';
-            size_str[3] = '\0';
-            terminal_print(size_str);
+    terminal_print("Arquivos no Diretorio Raiz:\n");
+    
+    int arquivos_encontrados = 0;
+    for (int i = 0; i < 16; i++) {
+        int offset = i * 32;
+        
+        if (fs_buffer[offset] == 0x00) {
+            break;
         }
+        
+        if (fs_buffer[offset] == 0xE5) {
+            continue;
+        }
+
+        arquivos_encontrados++;
+        terminal_print("  - ");
+        
+        for (int j = 0; j < 8; j++) {
+            if (fs_buffer[offset + j] != ' ') {
+                terminal_putchar(fs_buffer[offset + j]);
+            }
+        }
+        
+        terminal_print(".");
+        
+        for (int j = 0; j < 3; j++) {
+            terminal_putchar(fs_buffer[offset + 8 + j]);
+        }
+        
+        terminal_print("\n");
+    }
+
+    if (arquivos_encontrados == 0) {
+        terminal_print("  (Diretorio vazio - Nenhum arquivo encontrado)\n");
     }
 }
 
 void fs_read_file(const char* filename) {
-    for (int i = 0; i < file_count; i++) {
-        if (name_compare(root_dir[i].name, filename)) {
-            if (root_dir[i].attr & 0x10) {
-                terminal_print("Erro: Isto e um diretorio, nao um arquivo.\n");
-                return;
-            }
+    // Carrega o setor 10 (Diretório Raiz) para a RAM
+    ata_read_sector(10, fs_buffer);
 
-            // Lê o setor físico do HD onde o arquivo está guardado usando o driver ATA
-            ata_read_sector(root_dir[i].cluster, file_buffer);
+    // Varre as 16 entradas possíveis de 32 bytes cada
+    for (int i = 0; i < 16; i++) {
+        int offset = i * 32;
+        if (fs_buffer[offset] == 0x00) break;
+        if (fs_buffer[offset] == 0xE5) continue;
+
+        // Compara estritamente os 11 bytes do nome + extensão do padrão FAT
+        int match = 1;
+        for (int j = 0; j < 11; j++) {
+            if (fs_buffer[offset + j] != filename[j]) {
+                match = 0;
+                break;
+            }
+        }
+
+        // Se encontrou o arquivo correspondente
+        if (match) {
+            unsigned char data_buffer[512];
             
-            // Garante que o buffer termine em nulo para printar com segurança
-            file_buffer[root_dir[i].size] = '\0';
-            terminal_print((const char*)file_buffer);
-            terminal_print("\n");
+            // Lê o cluster inicial (offset 26 da entrada de diretório)
+            unsigned short cluster = *(unsigned short*)&fs_buffer[offset + 26];
+            
+            // Mapeamento de setores baseado no cluster do arquivo
+            if (cluster == 2) {
+                ata_read_sector(11, data_buffer); // Nosso arquivo criado via echo fica no setor 11
+            } else {
+                ata_read_sector(10, data_buffer); // Fallback para o setor do diretório/readme antigo
+            }
+            
+            terminal_print("Conteudo do arquivo:\n\"");
+            terminal_print((char*)data_buffer);
+            terminal_print("\"\n");
             return;
         }
     }
-    terminal_print("Arquivo nao encontrado.\n");
+    
+    // Debug visual para você ver exatamente o que o Kernel tentou buscar na RAM
+    terminal_print("Erro: Arquivo nao encontrado [");
+    for(int x = 0; x < 11; x++) {
+        if(filename[x] == ' ') terminal_putchar('_'); // Mostra espaços como underscores no log de erro
+        else terminal_putchar(filename[x]);
+    }
+    terminal_print("]\n");
+}
+
+void fs_create_file(const char* filename, const char* content) {
+    ata_read_sector(10, fs_buffer);
+
+    int entry_offset = -1;
+
+    for (int i = 0; i < 16; i++) {
+        int offset = i * 32;
+        if (fs_buffer[offset] == 0x00 || fs_buffer[offset] == 0xE5) {
+            entry_offset = offset;
+            break;
+        }
+    }
+
+    if (entry_offset == -1) {
+        terminal_print("Erro: Diretorio raiz cheio.\n");
+        return;
+    }
+
+    for (int j = 0; j < 11; j++) {
+        fs_buffer[entry_offset + j] = filename[j];
+    }
+
+    fs_buffer[entry_offset + 11] = 0x20; 
+
+    unsigned short* cluster_ptr = (unsigned short*)&fs_buffer[entry_offset + 26];
+    *cluster_ptr = 2;
+
+    unsigned int* size_ptr = (unsigned int*)&fs_buffer[entry_offset + 28];
+    *size_ptr = 512;
+
+    ata_write_sector(10, fs_buffer);
+
+    unsigned char data_sector[512];
+    for (int k = 0; k < 512; k++) {
+        data_sector[k] = '\0';
+    }
+
+    int len = 0;
+    while (content[len] != '\0' && len < 511) {
+        data_sector[len] = content[len];
+        len++;
+    }
+    data_sector[len] = '\0';
+
+    ata_write_sector(11, data_sector);
+
+    terminal_print("Arquivo criado e persistido no HD com sucesso!\n");
 }
