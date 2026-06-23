@@ -5,8 +5,8 @@ LD = ld
 ASM_SRC = src/boot/boot.asm
 ASM_OBJ = build/boot.o
 
-# Adicionado build/rtc.o na lista de objetos compilados
-KERNEL_OBJS = build/kernel.o build/vga.o build/shell.o build/ata.o build/fs.o build/rtc.o
+# Adicionado build/task.o na árvore de objetos
+KERNEL_OBJS = build/kernel.o build/vga.o build/shell.o build/ata.o build/fs.o build/rtc.o build/task.o
 
 LINKER_SCRIPT = linker.ld
 KERNEL_BIN = targets/x86_64/iso/boot/kernel.bin

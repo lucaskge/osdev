@@ -20,11 +20,15 @@ extern exception0_handler
 extern keyboard_handler
 global isr0
 global isr33
-global isr_ignore                       ; Torna o tratador padrão visível para o C
+global isr_ignore
+
+; Exportação da rotina de troca de contexto cooperativa que funcionou
+global switch_context_asm
+extern current_task_esp_ptr
+extern next_task_esp_val
 
 ; --- TRATADORES DE INTERRUPÇÃO (ISRs) ---
 
-; ISR 0: Tratador de Divisão por Zero
 align 4
 isr0:
     pusha
@@ -43,86 +47,93 @@ isr0:
     popa
     iret
 
-; ISR 33: Tratador do Teclado (IRQ1)
 align 4
 isr33:
-    pusha                               ; Salva os registradores gerais (EAX, ECX, etc)
-    push ds                             ; Salva registradores de segmento de dados
+    pusha
+    push ds
     push es
     push fs
     push gs
-
-    mov ax, 0x10                        ; Força o segmento de dados do Kernel (0x10)
+    mov ax, 0x10
     mov ds, ax
     mov es, ax
-
-    call keyboard_handler               ; Chama a lógica em C para processar a tecla
-
-    mov al, 0x20                        ; Envia o sinal de Fim de Interrupção (EOI)
-    out 0x20, al                        ; Sinaliza o PIC Master na porta 0x20
-
-    pop gs                              ; Restaura os segmentos na ordem inversa
+    call keyboard_handler
+    mov al, 0x20
+    out 0x20, al
+    pop gs
     pop fs
     pop es
     pop ds
-    popa                                ; Restaura os registradores gerais
-    iret                                ; Retorna ao código principal com segurança
+    popa
+    iret
 
-; ISR Padrão: Captura e descarta interrupções espúrias/indesejadas
 align 4
 isr_ignore:
     pusha
-    mov al, 0x20                        ; Avisa o PIC que recebemos o sinal
-    out 0x20, al                        ; Evita travamento do chip PIC Master
-    out 0xA0, al                        ; Evita travamento do chip PIC Slave
+    mov al, 0x20
+    out 0x20, al
+    out 0xA0, al
     popa
-    iret                                ; Ignora e retorna sem quebrar a CPU
+    iret
+
+
+; --- TROCA DE CONTEXTO COOPERATIVA PURA ---
+align 4
+switch_context_asm:
+    pushf                       ; Salva as FLAGS da tarefa antiga
+    push cs                     ; Salva o CS antigo
+    pusha                       ; Salva os 8 registradores gerais antigos
+
+    ; Salva o ESP físico atual no ponteiro que o C configurou
+    mov eax, [current_task_esp_ptr]
+    mov [eax], esp
+
+    ; Carrega o novo ESP físico que o C escolheu
+    mov esp, [next_task_esp_val]
+
+    popa                        ; Restaura os registradores gerais da nova tarefa
+    pop eax                     ; Descarta o CS de controle
+    pop eax                     ; Descarta as FLAGS de controle
+    ret                         ; Salta para o endereço de execução (EIP) da nova tarefa
+
 
 ; --- PONTO DE ENTRADA DO SISTEMA OPERACIONAL ---
 start:
-    cli                                 ; Garante interrupções desligadas no arranque
-    mov esp, stack_top                  ; Inicializa o ponteiro da pilha (Stack Pointer)
+    cli
+    mov esp, stack_top
 
-    lgdt [gdt_descriptor]               ; Carrega nossa GDT estável
-    jmp 0x08:.init_segments             ; Salto longo para atualizar CS para 0x08
+    lgdt [gdt_descriptor]
+    jmp 0x08:.init_segments
 
 .init_segments:
-    mov ax, 0x10                        ; Sincroniza todos os registradores de dados
+    mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
 
-    call kernel_main                    ; Executa a configuração da IDT e PIC no C
+    call kernel_main
 
     extern idtp
-    lidt [idtp]                         ; Carrega a IDT estruturada na CPU
+    lidt [idtp]
 
-    sti                                 ; Ativa as interrupções com segurança total
+    sti                         ; Ativa apenas as interrupções de teclado seguras
 
 .loop:
-    hlt                                 ; Coloca a CPU em repouso aguardando o teclado
-    jmp .loop                           ; Se acordar, volta a dormir
+    hlt
+    jmp .loop
 
-; --- DEFINIÇÃO DA GDT ESTÁVEL ---
 align 4
 gdt_start:
-    ; Entrada 0: Segmento nulo obrigatório
     dd 0x0
     dd 0x0
-
-    ; Entrada 1: Segmento de Código do Kernel (Seletor 0x08)
-    ; Base=0, Limite=0xFFFFF, Granularidade=4KB, 32-bits, Código Executável/Leitura
     dw 0xFFFF
     dw 0x0000
     db 0x00
     db 0x9A
     db 0xCF
     db 0x00
-
-    ; Entrada 2: Segmento de Dados do Kernel (Seletor 0x10)
-    ; Base=0, Limite=0xFFFFF, Granularidade=4KB, 32-bits, Dados Leitura/Escrita
     dw 0xFFFF
     dw 0x0000
     db 0x00
@@ -132,11 +143,11 @@ gdt_start:
 gdt_end:
 
 gdt_descriptor:
-    dw gdt_end - gdt_start - 1          ; Tamanho da GDT
-    dd gdt_start                        ; Endereço base da GDT
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
 
 section .bss
 align 16
 stack_bottom:
-    resb 16384                          ; Aloca 16KB de pilha
+    resb 16384
 stack_top:

@@ -1,7 +1,8 @@
 #include "shell.h"
 #include "vga.h"
 #include "fs.h"
-#include "rtc.h" // Inclui o novo driver de tempo
+#include "rtc.h"
+#include "task.h"
 
 #define BUFFER_SIZE 256
 
@@ -9,6 +10,7 @@ char shell_buffer[BUFFER_SIZE];
 int buffer_idx = 0;
 
 extern void outb(unsigned short port, unsigned char val);
+extern void start_multitasking(void);
 
 int str_compare(const char* s1, const char* s2) {
     int i = 0;
@@ -30,7 +32,6 @@ void sys_shutdown(void) {
     while(1) { __asm__ volatile("hlt"); }
 }
 
-// Função auxiliar para printar um número inteiro de 2 dígitos com zero à esquerda
 void shell_print_num2(int num) {
     char buf[3];
     buf[0] = '0' + (num / 10);
@@ -56,6 +57,7 @@ void shell_execute_command(void) {
         terminal_print("  ls       - Lista os arquivos do diretorio raiz\n");
         terminal_print("  cat      - Abre o arquivo README.TXT\n");
         terminal_print("  time     - Exibe a data e hora atual do chip RTC\n");
+        terminal_print("  task     - Inicia o agendador de multitarefa paralela\n");
         terminal_print("  shutdown - Desliga a maquina virtual");
     } 
     else if (str_compare(shell_buffer, "clear")) {
@@ -63,7 +65,7 @@ void shell_execute_command(void) {
     } 
     else if (str_compare(shell_buffer, "about")) {
         terminal_print("MeuOS v1.0.0 Bare Metal x86_32\n");
-        terminal_print("Modulo de Relogio de Hardware Ativo.");
+        terminal_print("Suporte a multi-threads nativo.");
     } 
     else if (str_compare(shell_buffer, "ls")) {
         fs_list_directory();
@@ -73,29 +75,24 @@ void shell_execute_command(void) {
     }
     else if (str_compare(shell_buffer, "time")) {
         struct rtc_time current_time;
-        rtc_get_time(&current_time); // Consulta a CMOS
-
+        rtc_get_time(&current_time);
         terminal_print("Data/Hora Atual: ");
-        shell_print_num2(current_time.day);
-        terminal_print("/");
-        shell_print_num2(current_time.month);
-        terminal_print("/");
-        
-        // Converte e exibe o ano 2026 de forma rudimentar
+        shell_print_num2(current_time.day); terminal_print("/");
+        shell_print_num2(current_time.month); terminal_print("/");
         char year_buf[5];
         year_buf[0] = '0' + (current_time.year / 1000);
         year_buf[1] = '0' + ((current_time.year / 100) % 10);
         year_buf[2] = '0' + ((current_time.year / 10) % 10);
-        year_buf[3] = '0' + (current_time.year % 10);
-        year_buf[4] = '\0';
-        terminal_print(year_buf);
-
-        terminal_print(" ");
-        shell_print_num2(current_time.hour);
-        terminal_print(":");
-        shell_print_num2(current_time.minute);
-        terminal_print(":");
+        year_buf[3] = '0' + (current_time.year % 10); year_buf[4] = '\0';
+        terminal_print(year_buf); terminal_print(" ");
+        shell_print_num2(current_time.hour); terminal_print(":");
+        shell_print_num2(current_time.minute); terminal_print(":");
         shell_print_num2(current_time.second);
+    }
+    else if (str_compare(shell_buffer, "task")) {
+        terminal_print("Passando o controle para os lacos paralelos nativos...\n");
+        task_init();           // Monta as duas pilhas estáveis na RAM
+        start_multitasking();  // Dispara o carrossel isolando o Shell
     }
     else if (str_compare(shell_buffer, "shutdown")) {
         sys_shutdown();
