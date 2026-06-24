@@ -2,6 +2,7 @@
 #include "shell.h"
 #include "ata.h"
 #include "fs.h" // Inclui o header do FS
+#include "mem.h"
 
 void idt_init(void);
 void pic_init(void);
@@ -79,6 +80,8 @@ void keyboard_handler(void) {
 }
 
 void kernel_main(void) {
+    mem_init();  // Ativa o alocador dinâmico antes de tudo
+
     terminal_clear();
     terminal_print("MeuOS Bare Metal - Inicializando Tabelas e Sistema de Arquivos...\n");
     

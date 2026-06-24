@@ -3,6 +3,7 @@
 #include "fs.h"
 #include "rtc.h"
 #include "task.h"
+#include "mem.h"
 
 #define BUFFER_SIZE 256
 
@@ -97,6 +98,7 @@ void shell_execute_command(void) {
         terminal_print("  cat [caminho_arquivo]      - Exibe o conteudo de um arquivo multinivel\n");
         terminal_print("  echo [caminho.ext] [texto] - Cria um arquivo em qualquer subpasta\n");
         terminal_print("  time                       - Exibe a data e hora atual do chip RTC\n");
+        terminal_print("  mem                        - Exibe o espaco livre de memoria RAM do Heap\n");
         terminal_print("  task                       - Inicia o agendador de multitarefa paralela\n");
         terminal_print("  shutdown                   - Desliga a maquina virtual\n");
         terminal_print("  rm [caminho]               - Remove arquivo ou pasta recursivamente\n");
@@ -192,6 +194,31 @@ void shell_execute_command(void) {
     }
     else if (str_prefix_compare(shell_buffer, "shutdown")) {
         sys_shutdown();
+    }
+    else if (str_prefix_compare(shell_buffer, "mem")) {
+        unsigned int free_bytes = mem_get_free_space();
+        
+        terminal_print("Estatísticas de Memória RAM:\n");
+        terminal_print("  Heap Livre: ");
+        
+        // Conversão simples de inteiro para string para exibir os bytes na tela
+        char num_buf[32];
+        int i = 0;
+        if (free_bytes == 0) {
+            terminal_print("0");
+        } else {
+            unsigned int temp = free_bytes;
+            while (temp > 0 && i < 30) {
+                num_buf[i++] = '0' + (temp % 10);
+                temp /= 10;
+            }
+            num_buf[i] = '\0';
+            // Imprime invertido
+            for (int j = i - 1; j >= 0; j--) {
+                terminal_putchar(num_buf[j]);
+            }
+        }
+        terminal_print(" bytes.\n");
     }
     else if (str_prefix_compare(shell_buffer, "mkdir")) {
         int arg_idx = 5;
