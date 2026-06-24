@@ -81,6 +81,24 @@ void format_fat_name(const char* input, char* output) {
 }
 
 void shell_execute_command(void) {
+
+    // Duas rotinas de teste isoladas que rodam em paralelo devolvendo o controle voluntariamente
+    void worker_task_1(void) {
+        while (1) {
+            terminal_print(" [T1] Processando em background no Heap...\n");
+            for (volatile int i = 0; i < 5000000; i++); // Delay simples
+            task_yield(); // Cede a CPU para a próxima tarefa
+        }
+    }
+
+    void worker_task_2(void) {
+        while (1) {
+            terminal_print(" [T2] Segunda tarefa dinamica ativa...\n");
+            for (volatile int i = 0; i < 5000000; i++); // Delay
+            task_yield();
+        }
+    }
+
     if (buffer_idx == 0) {
         shell_print_prompt();
         return;
@@ -189,9 +207,29 @@ void shell_execute_command(void) {
         shell_print_num2(current_time.second);
     }
     else if (str_prefix_compare(shell_buffer, "task")) {
-        terminal_print("Passando o controle para os lacos paralelos...\n");
-        task_init();       
-        start_multitasking();  
+        terminal_print("Inicializando estruturas e alocando pilhas na RAM...\n");
+        
+        task_init(); // Cria o processo pai do Shell
+        
+        int pid1 = task_create("Worker Alpha", worker_task_1);
+        int pid2 = task_create("Worker Beta", worker_task_2);
+
+        if (pid1 != -1 && pid2 != -1) {
+            terminal_print("Processos criados com sucesso. Disparando escalonador...\n");
+            
+            // Ativa o multitarefa passando o controle para os filhos pela primeira vez
+            start_multitasking();
+            
+            // LOOP DE CONTEXTO DO SHELL: Quando o escalonador devolver a CPU para o Shell,
+            // em vez do Shell encerrar o comando e exibir o prompt, ele imediatamente
+            // joga a CPU de volta para os filhos. Isso cria o loop infinito do Escalonador!
+            while(1) {
+                task_yield();
+            }
+            
+        } else {
+            terminal_print("Erro: Falha catastrófica ao alocar memoria.\n");
+        }
     }
     else if (str_prefix_compare(shell_buffer, "shutdown")) {
         sys_shutdown();
