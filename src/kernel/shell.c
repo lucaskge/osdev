@@ -94,6 +94,7 @@ void shell_execute_command(void) {
         terminal_print("  time                       - Exibe a data e hora atual do chip RTC\n");
         terminal_print("  task                       - Inicia o agendador de multitarefa paralela\n");
         terminal_print("  shutdown                   - Desliga a maquina virtual");
+        terminal_print("  rm [arquivo]               - Remove um arquivo liberando espaco no disco\n");
     } 
     else if (str_prefix_compare(shell_buffer, "clear")) {
         terminal_clear();
@@ -116,6 +117,23 @@ void shell_execute_command(void) {
             char formatted_name[12];
             format_fat_name(filename_arg, formatted_name);
             fs_read_file(formatted_name);
+        }
+    }
+    else if (str_prefix_compare(shell_buffer, "rm")) {
+        int arg_idx = 2; // O comando "rm" tem 2 caracteres, pulamos direto pro argumento
+        while (shell_buffer[arg_idx] == ' ') arg_idx++;
+
+        if (shell_buffer[arg_idx] == '\0') {
+            terminal_print("Uso: rm [NOME_DO_ARQUIVO.EXT]\n");
+        } else {
+            const char* filename_arg = &shell_buffer[arg_idx];
+            char formatted_name[12];
+            
+            // Padroniza o argumento (ex: "arq1.txt" -> "ARQ1    TXT")
+            format_fat_name(filename_arg, formatted_name);
+            
+            // Aciona a deleção isolada na camada do sistema de arquivos
+            fs_delete_file(formatted_name);
         }
     }
     else if (str_prefix_compare(shell_buffer, "echo")) {

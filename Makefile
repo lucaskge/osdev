@@ -34,7 +34,6 @@ $(ISO_IMAGE): $(KERNEL_BIN) targets/x86_64/iso/boot/grub/grub.cfg
 
 run: $(ISO_IMAGE)
 	@dd if=/dev/zero of=build/disk.img bs=1M count=32 2>/dev/null
-	@echo "Ola do arquivo de texto do HD!" | dd of=build/disk.img bs=512 seek=10 conv=notrunc 2>/dev/null
 	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -hda build/disk.img -m 512
 
 clean:
