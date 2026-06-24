@@ -16,9 +16,13 @@ section .text
 bits 32
 global start
 extern kernel_main
-extern exception0_handler
 extern keyboard_handler
+extern exception_handler                ; Centralizador da nova Tela Azul em C
+
 global isr0
+global isr6
+global isr13
+global isr14
 global isr33
 global isr_ignore
 
@@ -27,25 +31,57 @@ global switch_context_asm
 extern current_task_esp_ptr
 extern next_task_esp_val
 
-; --- TRATADORES DE INTERRUPÇÃO (ISRs) ---
+; --- TRATADORES DE EXCEÇÃO DA CPU (ISRs) ---
 
 align 4
 isr0:
+    push 0      ; Código de erro fictício (Divisão por zero não gera código de erro)
+    push 0      ; ID da interrupção (0)
+    jmp exception_common
+
+align 4
+isr6:
+    push 0      ; Código de erro fictício
+    push 6      ; ID da interrupção (6 - Opcode Inválido)
+    jmp exception_common
+
+align 4
+isr13:
+    ; O hardware já empurra o código de erro automaticamente aqui
+    push 13     ; ID da interrupção (13 - GPF)
+    jmp exception_common
+
+align 4
+isr14:
+    ; O hardware já empurra o código de erro automaticamente aqui
+    push 14     ; ID da interrupção (14 - Page Fault)
+    jmp exception_common
+
+; Rotina comum que envelopa o estado da CPU seguindo o padrão que você definiu
+exception_common:
     pusha
     push ds
     push es
     push fs
     push gs
+    
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    call exception0_handler
+    
+    call exception_handler
+    
+    ; Caso a exceção permitisse retorno (não é o nosso caso, pois damos hlt),
+    ; desfazemos a pilha perfeitamente:
     pop gs
     pop fs
     pop es
     pop ds
     popa
+    add esp, 8  ; Limpa o ID e o código de erro empurrados
     iret
+
+; --- TRATADORES DE DISPOSITIVOS EXTERNOS (IRQs) ---
 
 align 4
 isr33:
@@ -76,7 +112,6 @@ isr_ignore:
     popa
     iret
 
-
 ; --- TROCA DE CONTEXTO COOPERATIVA PURA ---
 align 4
 switch_context_asm:
@@ -95,7 +130,6 @@ switch_context_asm:
     pop eax                     ; Descarta o CS de controle
     pop eax                     ; Descarta as FLAGS de controle
     ret                         ; Salta para o endereço de execução (EIP) da nova tarefa
-
 
 ; --- PONTO DE ENTRADA DO SISTEMA OPERACIONAL ---
 start:

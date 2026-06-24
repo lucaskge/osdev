@@ -60,10 +60,10 @@ void pic_init(void) {
     outb(0x21, 0x04); outb(0xA1, 0x02); outb(0x21, 0x01); outb(0xA1, 0x01);
     outb(0x21, 0xFD); outb(0xA1, 0xFF);
 }
-void exception0_handler(void) {
-    terminal_print("\n[CRITICAL] Divisao por zero!\n");
-    while(1) { __asm__ volatile("hlt"); }
-}
+// void exception0_handler(void) {
+//     terminal_print("\n[CRITICAL] Divisao por zero!\n");
+//     while(1) { __asm__ volatile("hlt"); }
+// }
 
 unsigned char kbd_us[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -90,8 +90,19 @@ void kernel_main(void) {
 
     extern void isr0(void);
     extern void isr33(void);
-    idt_set_gate(0, (unsigned long)isr0, 0x08, 0x8E);   
-    idt_set_gate(33, (unsigned long)isr33, 0x08, 0x8E); 
+    extern void isr6(void);   // Adicionado
+    extern void isr13(void);  // Adicionado
+    extern void isr14(void);  // Adicionado
+
+    // Mapeia os tratamentos na tabela de vetores da CPU
+    idt_set_gate(0, (unsigned long)isr0, 0x08, 0x8E);   // Divisão por zero
+    idt_set_gate(6, (unsigned long)isr6, 0x08, 0x8E);   // Opcode inválido
+    idt_set_gate(13, (unsigned long)isr13, 0x08, 0x8E); // General Protection Fault
+    idt_set_gate(14, (unsigned long)isr14, 0x08, 0x8E); // Page Fault
+    idt_set_gate(33, (unsigned long)isr33, 0x08, 0x8E); // Teclado
+
+    // Removido função 'exception0_handler' antiga que estava solta no kernel.c, 
+    // pois agora ela foi absorvida de forma muito mais genérica pelo 'exception_handler' do exception.c
 
     paging_init();
     

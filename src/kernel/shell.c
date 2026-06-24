@@ -99,6 +99,7 @@ void shell_execute_command(void) {
         terminal_print("  echo [caminho.ext] [texto] - Cria um arquivo em qualquer subpasta\n");
         terminal_print("  time                       - Exibe a data e hora atual do chip RTC\n");
         terminal_print("  mem                        - Exibe o espaco livre de memoria RAM do Heap\n");
+        terminal_print("  panic                      - Forca uma divisao por zero via hardware para testar a IDT\n");
         terminal_print("  task                       - Inicia o agendador de multitarefa paralela\n");
         terminal_print("  shutdown                   - Desliga a maquina virtual\n");
         terminal_print("  rm [caminho]               - Remove arquivo ou pasta recursivamente\n");
@@ -219,6 +220,20 @@ void shell_execute_command(void) {
             }
         }
         terminal_print(" bytes.\n");
+    }
+    else if (str_prefix_compare(shell_buffer, "panic")) {
+        terminal_print("Provocando falha de hardware controlada...\n");
+        
+        // Enganamos o otimizador do compilador usando Assembly Inline puro.
+        // Dividimos o registrador EAX por EBX (que está zerado).
+        __asm__ volatile (
+            "movl $10, %%eax \n\t"
+            "movl $0, %%ebx  \n\t"
+            "divl %%ebx"
+            :
+            :
+            : "eax", "ebx"
+        );
     }
     else if (str_prefix_compare(shell_buffer, "mkdir")) {
         int arg_idx = 5;
