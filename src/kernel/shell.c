@@ -22,7 +22,11 @@ int str_prefix_compare(const char* buffer, const char* cmd) {
 }
 
 void shell_print_prompt(void) {
-    terminal_print("\n> ");
+    if (current_directory_cluster == 0) {
+        terminal_print("\n[/] > ");
+    } else {
+        terminal_print("\n[sub] > ");
+    }
 }
 
 void sys_shutdown(void) {
@@ -40,6 +44,7 @@ void shell_print_num2(int num) {
     terminal_print(buf);
 }
 
+// Mantida no arquivo para compatibilidade, caso outros módulos necessitem
 void format_fat_name(const char* input, char* output) {
     for (int i = 0; i < 11; i++) output[i] = ' ';
     output[11] = '\0';
@@ -88,67 +93,61 @@ void shell_execute_command(void) {
         terminal_print("  help                       - Mostra esta lista de comandos\n");
         terminal_print("  clear                      - Limpa a tela do terminal\n");
         terminal_print("  about                      - Exibe informacoes do sistema\n");
-        terminal_print("  ls                         - Lista os arquivos do diretorio raiz\n");
-        terminal_print("  cat [arquivo]              - Exibe o conteudo de um arquivo\n");
-        terminal_print("  echo [arquivo.ext] [texto] - Cria um arquivo com um texto customizado\n");
+        terminal_print("  ls [caminho]               - Lista arquivos do diretorio atual ou indicado\n");
+        terminal_print("  cat [caminho_arquivo]      - Exibe o conteudo de um arquivo multinivel\n");
+        terminal_print("  echo [caminho.ext] [texto] - Cria um arquivo em qualquer subpasta\n");
         terminal_print("  time                       - Exibe a data e hora atual do chip RTC\n");
         terminal_print("  task                       - Inicia o agendador de multitarefa paralela\n");
-        terminal_print("  shutdown                   - Desliga a maquina virtual");
-        terminal_print("  rm [arquivo]               - Remove um arquivo liberando espaco no disco\n");
+        terminal_print("  shutdown                   - Desliga a maquina virtual\n");
+        terminal_print("  rm [caminho]               - Remove arquivo ou pasta recursivamente\n");
+        terminal_print("  mkdir [caminho_pasta]      - Cria uma nova pasta (suporta subniveis)\n");
+        terminal_print("  cd [caminho_pasta]         - Altera o diretorio de trabalho de forma relativa ou absoluta\n");
     } 
     else if (str_prefix_compare(shell_buffer, "clear")) {
         terminal_clear();
     } 
     else if (str_prefix_compare(shell_buffer, "about")) {
         terminal_print("MeuOS v1.0.0 Bare Metal x86_32\n");
-        terminal_print("Interpretador de comandos com multiplos argumentos ativo.");
+        terminal_print("Interpretador de comandos com suporte a Path Tokenizer hierarquico.");
     } 
     else if (str_prefix_compare(shell_buffer, "ls")) {
-        fs_list_directory();
+        int arg_idx = 2;
+        while (shell_buffer[arg_idx] == ' ') arg_idx++;
+
+        // Repassa o argumento diretamente para o resolvedor de caminhos
+        fs_list_directory(&shell_buffer[arg_idx]);
     }
     else if (str_prefix_compare(shell_buffer, "cat")) {
         int arg_idx = 3;
         while (shell_buffer[arg_idx] == ' ') arg_idx++;
 
         if (shell_buffer[arg_idx] == '\0') {
-            terminal_print("Uso: cat [NOME_DO_ARQUIVO.EXT]\n");
+            terminal_print("Uso: cat [CAMINHO_DO_ARQUIVO.EXT]\n");
         } else {
-            const char* filename_arg = &shell_buffer[arg_idx];
-            char formatted_name[12];
-            format_fat_name(filename_arg, formatted_name);
-            fs_read_file(formatted_name);
+            // Envia o caminho multinível completo sem truncar
+            fs_read_file(&shell_buffer[arg_idx]);
         }
     }
     else if (str_prefix_compare(shell_buffer, "rm")) {
-        int arg_idx = 2; // O comando "rm" tem 2 caracteres, pulamos direto pro argumento
+        int arg_idx = 2;
         while (shell_buffer[arg_idx] == ' ') arg_idx++;
 
         if (shell_buffer[arg_idx] == '\0') {
-            terminal_print("Uso: rm [NOME_DO_ARQUIVO.EXT]\n");
+            terminal_print("Uso: rm [CAMINHO_ALVO]\n");
         } else {
-            const char* filename_arg = &shell_buffer[arg_idx];
-            char formatted_name[12];
-            
-            // Padroniza o argumento (ex: "arq1.txt" -> "ARQ1    TXT")
-            format_fat_name(filename_arg, formatted_name);
-            
-            // Aciona a deleção isolada na camada do sistema de arquivos
-            fs_delete_file(formatted_name);
+            // Aciona a exclusão inteligivel (arquivo ou árvore recursiva de diretórios)
+            fs_delete_file(&shell_buffer[arg_idx]);
         }
     }
     else if (str_prefix_compare(shell_buffer, "echo")) {
-        // Ignora espaços após a palavra 'echo'
         int idx = 4;
         while (shell_buffer[idx] == ' ') idx++;
 
-        // Se não houver argumentos após o echo
         if (shell_buffer[idx] == '\0') {
-            terminal_print("Uso: echo [NOME_DO_ARQUIVO.EXT] [MENSAGEM DE TEXTO]\n");
+            terminal_print("Uso: echo [CAMINHO_DO_ARQUIVO.EXT] [MENSAGEM DE TEXTO]\n");
         } else {
-            // Captura o ponteiro de início do nome do arquivo
             const char* file_arg = &shell_buffer[idx];
 
-            // Avança o índice até o final do nome do arquivo (encontrar o próximo espaço)
             while (shell_buffer[idx] != ' ' && shell_buffer[idx] != '\0') {
                 idx++;
             }
@@ -156,10 +155,7 @@ void shell_execute_command(void) {
             if (shell_buffer[idx] == '\0') {
                 terminal_print("Erro: Digite o conteudo do texto apos o nome do arquivo.\n");
             } else {
-                // Insere um terminador nulo temporário para isolar o argumento do nome do arquivo
-                shell_buffer[idx] = '\0';
-                
-                // Avança para capturar o início do bloco de texto livre
+                shell_buffer[idx] = '\0'; // Separa dinamicamente o path longo do texto
                 idx++;
                 while (shell_buffer[idx] == ' ') idx++;
 
@@ -167,13 +163,8 @@ void shell_execute_command(void) {
                     terminal_print("Erro: Arquivo nao pode ser criado vazio.\n");
                 } else {
                     const char* content_arg = &shell_buffer[idx];
-                    char formatted_name[12];
-
-                    // Formata o nome do arquivo para os 11 bytes exigidos pelo FAT
-                    format_fat_name(file_arg, formatted_name);
-
-                    // Dispara a criação física dinâmica no HD
-                    fs_create_file(formatted_name, content_arg);
+                    // Dispara a criação no diretório alvo do caminho indicado
+                    fs_create_file(file_arg, content_arg);
                 }
             }
         }
@@ -201,6 +192,28 @@ void shell_execute_command(void) {
     }
     else if (str_prefix_compare(shell_buffer, "shutdown")) {
         sys_shutdown();
+    }
+    else if (str_prefix_compare(shell_buffer, "mkdir")) {
+        int arg_idx = 5;
+        while (shell_buffer[arg_idx] == ' ') arg_idx++;
+
+        if (shell_buffer[arg_idx] == '\0') {
+            terminal_print("Uso: mkdir [CAMINHO_DA_PASTA]\n");
+        } else {
+            // Permite criar pastas em ramificações profundas
+            fs_create_directory(&shell_buffer[arg_idx]);
+        }
+    }
+    else if (str_prefix_compare(shell_buffer, "cd")) {
+        int arg_idx = 2;
+        while (shell_buffer[arg_idx] == ' ') arg_idx++;
+
+        if (shell_buffer[arg_idx] == '\0') {
+            fs_change_directory("");
+        } else {
+            // Envia o path multinível de navegação diretamente
+            fs_change_directory(&shell_buffer[arg_idx]);
+        }
     }
     else {
         terminal_print("Comando nao encontrado: ");
